@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>精灵图处理工具</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="logo">◆</span> 精灵图处理工具</div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="crop">✂️ 裁剪工具</button>
+    <button class="tab" data-tab="stitch">🧩 拼接工具</button>
+    <button class="tab" data-tab="autocrop">🔎 自动裁剪</button>
+    <button class="tab" data-tab="autostitch">🗺️ 自动拼接</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- ================= 1. 裁剪 ================= -->
+<section class="page active" id="page-crop">
+  <div class="card">
+    <div class="drop" id="crop-drop">
+      <input type="file" id="crop-input" accept="image/*" multiple hidden>
+      <div class="drop-inner">
+        <div class="drop-icon">🖼️</div>
+        <div>拖拽图片到此处，或 <button class="btn primary sm" id="crop-pick">选择图片</button></div>
+        <div class="hint">自动检测图像四边最远像素做矩形裁剪 · 结果不会自动保存 · 可手动微调后导出 PNG</div>
+      </div>
+    </div>
+
+    <div class="crop-layout">
+      <aside class="list" id="crop-list"></aside>
+      <div class="editor">
+        <div class="editor-head">
+          <div class="file-name" id="crop-name">未选择图片</div>
+          <div class="badge" id="crop-badge">—</div>
+        </div>
+        <div class="canvas-box"><canvas id="crop-canvas" width="10" height="10"></canvas></div>
+
+        <div class="ctrl-grid">
+          <div class="ctrl"><label>检测方式</label>
+            <select id="crop-mode">
+              <option value="alpha">透明通道 (Alpha)</option>
+              <option value="bg">背景色差分 (取四角)</option>
+            </select>
+          </div>
+          <div class="ctrl"><label>Alpha 阈值</label>
+            <div class="range-row"><input type="range" id="crop-alpha" min="1" max="254" value="1"><span class="val" id="crop-alpha-val">1</span></div>
+          </div>
+          <div class="ctrl"><label>颜色容差</label>
+            <div class="range-row"><input type="range" id="crop-tol" min="0" max="255" value="24"><span class="val" id="crop-tol-val">24</span></div>
+          </div>
+        </div>
+
+        <div class="offsets">
+          <div class="off-item"><span>左</span><button class="mini" data-off="l" data-d="-1">−</button><input type="number" class="off-num" data-off="l" value="0" step="1"><button class="mini" data-off="l" data-d="1">+</button></div>
+          <div class="off-item"><span>上</span><button class="mini" data-off="t" data-d="-1">−</button><input type="number" class="off-num" data-off="t" value="0" step="1"><button class="mini" data-off="t" data-d="1">+</button></div>
+          <div class="off-item"><span>右</span><button class="mini" data-off="r" data-d="-1">−</button><input type="number" class="off-num" data-off="r" value="0" step="1"><button class="mini" data-off="r" data-d="1">+</button></div>
+          <div class="off-item"><span>下</span><button class="mini" data-off="b" data-d="-1">−</button><input type="number" class="off-num" data-off="b" value="0" step="1"><button class="mini" data-off="b" data-d="1">+</button></div>
+          <div class="off-tip">正数 = 向该方向扩展，负数 = 向该方向收缩（单位：像素）</div>
+        </div>
+
+        <div class="info" id="crop-info">—</div>
+
+        <div class="actions">
+          <button class="btn ghost" id="crop-redetect">重新检测</button>
+          <button class="btn ghost" id="crop-reset">重置调整</button>
+          <button class="btn primary" id="crop-export-one">导出当前 PNG</button>
+          <button class="btn" id="crop-export-all">导出全部 (ZIP)</button>
+          <button class="btn ghost" id="crop-clear">清空列表</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 2. 拼接 ================= -->
+<section class="page" id="page-stitch">
+  <div class="subtabs">
+    <button class="subtab active" data-sub="static">静态图像拼接</button>
+    <button class="subtab" data-sub="gif">GIF 帧编辑</button>
+  </div>
+
+  <!-- ---- 静态图像 ---- -->
+  <div class="card sub" id="sub-static">
+    <div class="drop" id="st-drop">
+      <input type="file" id="st-input" accept="image/png,image/jpeg,image/webp,image/bmp,image/*" multiple hidden>
+      <div class="drop-inner">
+        <div class="drop-icon">🧩</div>
+        <div>拖拽多张 PNG / JPG 到此处，或 <button class="btn primary sm" id="st-pick">选择图片</button></div>
+        <div class="hint">帧顺序默认 = 上传顺序，可切换名称排序或手动拖动调整</div>
+      </div>
+    </div>
+
+    <div class="stitch-layout">
+      <aside class="list" id="st-list"></aside>
+      <div class="editor">
+        <div class="params">
+          <div class="p"><label>图像宽</label><input id="st-w" readonly value="—"></div>
+          <div class="p"><label>图像高</label><input id="st-h" readonly value="—"></div>
+          <div class="p"><label>帧数</label><input id="st-frames" type="number" min="1" placeholder="自动"></div>
+          <div class="p"><label>行</label><input id="st-rows" type="number" min="1" value="1"></div>
+          <div class="p"><label>列</label><input id="st-cols" type="number" min="1" value="1"></div>
+          <div class="p"><label>排序</label>
+            <select id="st-sort">
+              <option value="none">上传顺序</option>
+              <option value="name-asc">名称升序</option>
+              <option value="name-desc">名称降序</option>
+              <option value="name-num">名称自然序</option>
+            </select>
+          </div>
+          <div class="p check"><label><input type="checkbox" id="st-mirror"> 镜像（帧数自动翻倍）</label></div>
+        </div>
+
+        <div class="actions">
+          <button class="btn ghost" id="st-refresh">刷新预览</button>
+          <button class="btn primary" id="st-export-png">导出 PNG</button>
+          <button class="btn" id="st-export-gif">导出 GIF</button>
+          <span class="inline-field">GIF 帧延时 <input id="st-delay" type="number" min="0" step="10" value="100"> ms</span>
+          <button class="btn ghost" id="st-clear">清空</button>
+        </div>
+
+        <div class="previews">
+          <div class="pv">
+            <div class="pv-title">合成图预览 <span class="hint" id="st-sheet-dim"></span></div>
+            <div class="pv-canvas"><canvas id="st-sheet" width="10" height="10"></canvas></div>
+          </div>
+          <div class="pv">
+            <div class="pv-title">动画预览 <button class="mini" id="st-prev" title="上一帧（自动暂停）">‹</button><button class="mini" id="st-play" title="播放/暂停">▶</button><button class="mini" id="st-next" title="下一帧（自动暂停）">›</button> <span class="hint" id="st-anim-info"></span></div>
+            <div class="pv-canvas"><canvas id="st-anim" width="10" height="10"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---- GIF 帧编辑 ---- -->
+  <div class="card sub" id="sub-gif" hidden>
+    <input type="file" id="gif-insert-input" accept="image/*" multiple hidden>
+    <div class="drop" id="gif-drop">
+      <input type="file" id="gif-input" accept="image/gif" hidden>
+      <div class="drop-inner">
+        <div class="drop-icon">🎞️</div>
+        <div>拖拽 GIF 到此处，或 <button class="btn primary sm" id="gif-pick">选择 GIF</button></div>
+        <div class="hint">可删帧 / 插帧 / 拖动排序 / 逐帧或批量调整跳转时间 · 可导出 PNG 或 GIF</div>
+      </div>
+    </div>
+
+    <div class="stitch-layout">
+      <aside class="list" id="gif-list"></aside>
+      <div class="editor">
+        <div class="params">
+          <div class="p"><label>帧宽</label><input id="gif-w" readonly value="—"></div>
+          <div class="p"><label>帧高</label><input id="gif-h" readonly value="—"></div>
+          <div class="p"><label>帧数</label><input id="gif-count" readonly value="0"></div>
+          <div class="p"><label>行</label><input id="gif-rows" type="number" min="1" value="1"></div>
+          <div class="p"><label>列</label><input id="gif-cols" type="number" min="1" value="1"></div>
+          <div class="p check"><label><input type="checkbox" id="gif-mirror"> 镜像（帧数翻倍）</label></div>
+        </div>
+
+        <div class="actions">
+          <button class="btn ghost" id="gif-ins-file">插入图片帧</button>
+          <span class="inline-field">全部帧设为 <input id="gif-delay-all" type="number" min="0" step="10" value="100" class="tiny-num"> ms
+            <button class="btn ghost sm" id="gif-apply-all">应用</button></span>
+          <button class="btn primary" id="gif-export-png">导出 PNG</button>
+          <button class="btn" id="gif-export-gif">导出 GIF</button>
+          <button class="btn ghost" id="gif-clear">清空</button>
+        </div>
+
+        <div class="previews">
+          <div class="pv">
+            <div class="pv-title">合成图预览 <span class="hint" id="gif-sheet-dim"></span></div>
+            <div class="pv-canvas"><canvas id="gif-sheet" width="10" height="10"></canvas></div>
+          </div>
+          <div class="pv">
+            <div class="pv-title">GIF 预览 <button class="mini" id="gif-prev" title="上一帧（自动暂停）">‹</button><button class="mini" id="gif-play" title="播放/暂停">▶</button><button class="mini" id="gif-next" title="下一帧（自动暂停）">›</button> <span class="hint" id="gif-anim-info"></span></div>
+            <div class="pv-canvas"><canvas id="gif-anim" width="10" height="10"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 3. 自动裁剪 ================= -->
+<section class="page" id="page-autocrop">
+  <div class="card">
+    <div class="drop" id="ac-drop">
+      <input type="file" id="ac-input" accept="image/*" hidden>
+      <div class="drop-inner">
+        <div class="drop-icon">🔎</div>
+        <div>拖拽 1 张精灵表到此处，或 <button class="btn primary sm" id="ac-pick">选择图片</button></div>
+        <div class="hint">把一张精灵表自动拆成单帧 · 支持「按单元格尺寸」或「按行列数」拆分 · 可逐个或打包导出</div>
+      </div>
+    </div>
+
+    <div class="stitch-layout">
+      <aside class="list" id="ac-list"></aside>
+      <div class="editor">
+        <div class="editor-head">
+          <div class="file-name" id="ac-name">未选择图片</div>
+          <div class="badge" id="ac-badge">—</div>
+        </div>
+        <div class="canvas-box"><canvas id="ac-canvas" width="10" height="10"></canvas></div>
+
+        <div class="ctrl-grid">
+          <div class="ctrl"><label>拆分方式</label>
+            <select id="ac-mode">
+              <option value="cell">按单元格尺寸</option>
+              <option value="grid">按行列数</option>
+            </select>
+          </div>
+          <div class="ctrl ac-by-cell"><label>单元格宽</label><input type="number" id="ac-cw" min="1" value="32"></div>
+          <div class="ctrl ac-by-cell"><label>单元格高</label><input type="number" id="ac-ch" min="1" value="32"></div>
+          <div class="ctrl ac-by-grid" hidden><label>行数</label><input type="number" id="ac-rows" min="1" value="4"></div>
+          <div class="ctrl ac-by-grid" hidden><label>列数</label><input type="number" id="ac-cols" min="1" value="4"></div>
+          <div class="ctrl"><label>起始 X</label><input type="number" id="ac-offx" min="0" value="0"></div>
+          <div class="ctrl"><label>起始 Y</label><input type="number" id="ac-offy" min="0" value="0"></div>
+          <div class="ctrl"><label>间距 X</label><input type="number" id="ac-gapx" min="0" value="0"></div>
+          <div class="ctrl"><label>间距 Y</label><input type="number" id="ac-gapy" min="0" value="0"></div>
+          <div class="ctrl"><label>文件名前缀</label><input type="text" id="ac-prefix" placeholder="(用原文件名)"></div>
+        </div>
+
+        <div class="info" id="ac-info">—</div>
+
+        <div class="actions">
+          <button class="btn ghost" id="ac-refresh">刷新预览</button>
+          <button class="btn primary" id="ac-export-zip">导出全部 (ZIP)</button>
+          <button class="btn ghost" id="ac-clear">清空</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 4. 自动拼接（占位） ================= -->
+<section class="page" id="page-autostitch">
+  <div class="placeholder">
+    <div class="ph-icon">🗺️</div>
+    <h2>自动拼接</h2>
+    <div class="ph-badge">未实装 · 仅占位</div>
+    <div class="ph-desc">
+      把上传的所有 PNG 图像，以<b>最节省空间的方式</b>（矩形装箱 / atlas packing）铺到一张大 PNG 上，
+      并同时导出<b>每张子图的节选信息</b>（坐标 + 尺寸，即类似 Live2D 动画使用的那张原图的裁切数据）。
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="toast"></div>
+
+<script src="gif-codec.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
