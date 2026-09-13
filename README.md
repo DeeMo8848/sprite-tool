@@ -3,7 +3,10 @@
 一个**纯本地、零依赖**的精灵图（Sprite Sheet）处理工具。全部逻辑用原生 HTML + CSS + JavaScript 实现，
 不需要安装任何东西，也不需要起服务器 —— **直接双击 `index.html` 就能用**。
 
-自带一套手写的 GIF 编解码器（LZW + 中位切分量化），因此 GIF 的读取与导出都不依赖任何第三方库，
+> 说明：本工具由 AI 编程助手生成，属于**非专业、个人自用**的小工具，主要用途是给游戏
+> **铁锈战争（Rusted Warfare）** 做模组图像处理与 GIF 制作。
+
+自带一套由 AI 编程助手编写的 GIF 编解码器（LZW + 中位切分量化），因此 GIF 的读取与导出都不依赖任何第三方库，
 离线、`file://` 环境下同样可用。
 
 ---
@@ -108,7 +111,7 @@
 
 ## 技术说明
 
-### 自研 GIF 编解码器（`gif-codec.js`）
+### GIF 编解码器（`gif-codec.js`）
 
 - `GifCodec.decodeGif(buffer)` → `{ width, height, frames: [{ data: Uint8ClampedArray(RGBA), delay }] }`
 - `GifCodec.encodeGif(frames, width, height, { loop })` → `Uint8Array`（GIF89a，带透明通道）
