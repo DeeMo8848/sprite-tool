@@ -480,7 +480,7 @@ $('#crop-clear').addEventListener('click', function () {
 /* ================================================================== */
 /*  ② 拼接 — 静态图像                                                 */
 /* ================================================================== */
-var st = { items: [], seq: 0, framesTouched: false, gridMode: null, cells: [], cellW: 0, cellH: 0, rows: 1, cols: 1, sort: 'none' };
+var st = { items: [], seq: 0, framesTouched: false, gridMode: null, cells: [], cellW: 0, cellH: 0, rows: 1, cols: 1, blockRows: 1, blockCols: 1, mirrorStart: -1, layout: 'compact', sort: 'none' };
 var stAnim = createAnim($('#st-anim'));
 
 function addStFiles(fileList) {
@@ -552,20 +552,47 @@ function buildStaticCells() {
     });
     cells = base.concat(mir);
   }
-  return { cells: cells, cellW: cellW, cellH: cellH };
+  return { cells: cells, cellW: cellW, cellH: cellH, mirrorStart: $('#st-mirror').checked ? base.length : -1 };
 }
 
 function computeGrid(total) {
+  var mirror = $('#st-mirror').checked;
+  var layout = $('#st-layout').value;
   var rows = parseInt($('#st-rows').value, 10) || 1;
   var cols = parseInt($('#st-cols').value, 10) || 1;
+  // 结构排列：正常帧块(N 帧)按 rows/cols 排布，镜像块同形叠在正下方
+  if (layout === 'structural' && mirror && total >= 2 && total % 2 === 0) {
+    var baseN = total / 2, br, bc;
+    if (st.gridMode === 'rows') { br = rows; bc = Math.max(1, Math.ceil(baseN / br)); }
+    else if (st.gridMode === 'cols') { bc = cols; br = Math.max(1, Math.ceil(baseN / bc)); }
+    else { br = 1; bc = Math.max(1, baseN); }
+    if (total > 0) { $('#st-rows').value = br; $('#st-cols').value = bc; }
+    return { rows: br * 2, cols: bc, blockRows: br, blockCols: bc };
+  }
   if (st.gridMode === 'rows') cols = Math.max(1, Math.ceil(total / rows));
   else if (st.gridMode === 'cols') rows = Math.max(1, Math.ceil(total / cols));
   else {
-    rows = $('#st-mirror').checked ? 2 : 1;
+    rows = mirror ? 2 : 1;
     cols = Math.max(1, Math.ceil(total / rows));
   }
   if (total > 0) { $('#st-rows').value = rows; $('#st-cols').value = cols; }
-  return { rows: rows, cols: cols };
+  return { rows: rows, cols: cols, blockRows: rows, blockCols: cols };
+}
+
+// 帧 i 在合成网格中的行列位置（结构排列时镜像块另起一段）
+function stCellPos(i, g) {
+  if (st.layout === 'structural' && st.mirrorStart >= 0) {
+    var baseN = st.mirrorStart;
+    var block = i < baseN ? 0 : 1;
+    var wi = block ? i - baseN : i;
+    var br = g.blockRows, bc = g.blockCols;
+    return { r: Math.floor(wi / bc) + block * br, col: wi % bc };
+  }
+  return { r: Math.floor(i / g.cols), col: i % g.cols };
+}
+
+function stOffX(i, coff) {
+  return (st.mirrorStart >= 0 && i >= st.mirrorStart) ? -coff : coff;
 }
 
 function renderStitch() {
@@ -573,7 +600,9 @@ function renderStitch() {
   var cells = built.cells, cellW = built.cellW, cellH = built.cellH;
   var total = cells.length;
   var g = computeGrid(total);
-  st.cells = cells; st.cellW = cellW; st.cellH = cellH; st.rows = g.rows; st.cols = g.cols;
+  st.cells = cells; st.cellW = cellW; st.cellH = cellH;
+  st.rows = g.rows; st.cols = g.cols; st.blockRows = g.blockRows; st.blockCols = g.blockCols;
+  st.mirrorStart = built.mirrorStart; st.layout = $('#st-layout').value;
 
   $('#st-w').value = cellW ? cellW : '—';
   $('#st-h').value = cellH ? cellH : '—';
@@ -591,14 +620,30 @@ function renderStitch() {
   var ctx = cv.getContext('2d');
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, cv.width, cv.height);
+  var coff = parseInt($('#st-coff').value, 10) || 0;
   cells.forEach(function (c, i) {
-    var r = Math.floor(i / g.cols), col = i % g.cols;
-    if (r >= g.rows) return;
-    ctx.drawImage(c, col * cellW, r * cellH);
+    var p = stCellPos(i, g);
+    if (p.r >= g.rows) return;
+    ctx.drawImage(c, p.col * cellW + stOffX(i, coff), p.r * cellH);
   });
-  $('#st-sheet-dim').textContent = cv.width + '×' + cv.height + '　(' + g.rows + ' 行 × ' + g.cols + ' 列, 共 ' + total + ' 帧)';
+  // 结构排列：在正常/镜像块之间画一条分隔线，便于一眼区分（仅预览，不进入导出图）
+  if (st.layout === 'structural' && st.mirrorStart >= 0) {
+    ctx.strokeStyle = 'rgba(91,140,255,.6)'; ctx.lineWidth = 1;
+    var y = st.blockRows * cellH + 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cv.width, y); ctx.stroke();
+  }
+  var dimNote = (st.layout === 'structural' && st.mirrorStart >= 0) ? '　· 结构排列(镜像分行)' : '';
+  $('#st-sheet-dim').textContent = cv.width + '×' + cv.height + '　(' + g.rows + ' 行 × ' + g.cols + ' 列, 共 ' + total + ' 帧)' + dimNote;
 
-  stAnim.setFrames(cells, cells.map(function () { return parseInt($('#st-delay').value, 10) || 100; }));
+  // 动画：每帧按居中偏移绘制到 cellW×cellH，使预览与导出一致
+  var animDelay = parseInt($('#st-delay').value, 10) || 100;
+  var animFrames = cells.map(function (c, i) {
+    var fcv = makeCanvas(cellW, cellH), fc = ctx2d(fcv);
+    fc.imageSmoothingEnabled = false;
+    fc.drawImage(c, stOffX(i, coff), 0);
+    return fcv;
+  });
+  stAnim.setFrames(animFrames, cells.map(function () { return animDelay; }));
   stAnim.onFrame = function (i, n) { $('#st-anim-info').textContent = i + '/' + n; };
   renderStitchList();
 }
@@ -645,6 +690,8 @@ $('#st-frames').addEventListener('input', function () {
 $('#st-rows').addEventListener('input', function () { st.gridMode = 'rows'; renderStitch(); });
 $('#st-cols').addEventListener('input', function () { st.gridMode = 'cols'; renderStitch(); });
 $('#st-mirror').addEventListener('change', function () { st.gridMode = null; renderStitch(); });
+$('#st-coff').addEventListener('input', function () { renderStitch(); });
+$('#st-layout').addEventListener('change', function () { renderStitch(); });
 $('#st-sort').addEventListener('change', function () { applySort(); renderStitch(); });
 $('#st-refresh').addEventListener('click', function () { renderStitch(); toast('已刷新预览'); });
 $('#st-delay').addEventListener('input', function () { renderStitch(); });
@@ -666,10 +713,11 @@ function stSheetCanvas() {
   if (!st.cells.length) return null;
   var cv = makeCanvas(st.cols * st.cellW, st.rows * st.cellH), c = cv.getContext('2d');
   c.imageSmoothingEnabled = false;
+  var coff = parseInt($('#st-coff').value, 10) || 0;
   st.cells.forEach(function (cell, i) {
-    var r = Math.floor(i / st.cols), col = i % st.cols;
-    if (r >= st.rows) return;
-    c.drawImage(cell, col * st.cellW, r * st.cellH);
+    var p = stCellPos(i, { rows: st.rows, cols: st.cols, blockRows: st.blockRows, blockCols: st.blockCols });
+    if (p.r >= st.rows) return;
+    c.drawImage(cell, p.col * st.cellW + stOffX(i, coff), p.r * st.cellH);
   });
   return cv;
 }
@@ -681,10 +729,11 @@ $('#st-export-png').addEventListener('click', function () {
 $('#st-export-gif').addEventListener('click', function () {
   if (!st.cells.length) { toast('请先添加图片', 'err'); return; }
   var delay = parseInt($('#st-delay').value, 10); if (isNaN(delay)) delay = 100;
-  var frames = st.cells.map(function (cell) {
+  var coff = parseInt($('#st-coff').value, 10) || 0;
+  var frames = st.cells.map(function (cell, i) {
     var cv = makeCanvas(st.cellW, st.cellH), c = ctx2d(cv);
     c.imageSmoothingEnabled = false;
-    c.drawImage(cell, 0, 0);
+    c.drawImage(cell, stOffX(i, coff), 0);
     return { data: c.getImageData(0, 0, st.cellW, st.cellH).data, delay: delay };
   });
   try {

@@ -114,6 +114,13 @@
             </select>
           </div>
           <div class="p check"><label><input type="checkbox" id="st-mirror"> 镜像（帧数自动翻倍）</label></div>
+          <div class="p"><label>居中偏移</label><input id="st-coff" type="number" step="1" min="-9999" max="9999" value="0" title="正常帧右移该值，镜像帧反向(左移)。用于把内容偏置的精灵图在每帧内居中，避免导入游戏后还需手动设偏移。"><span class="unit">px</span></div>
+          <div class="p"><label>镜像布局</label>
+            <select id="st-layout">
+              <option value="compact">紧凑排列</option>
+              <option value="structural">结构排列（镜像分行）</option>
+            </select>
+          </div>
         </div>
 
         <div class="actions">
