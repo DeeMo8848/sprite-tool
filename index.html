@@ -138,6 +138,14 @@
           </div>
           <div class="pv">
             <div class="pv-title">动画预览 <button class="mini" id="st-prev" title="上一帧（自动暂停）">‹</button><button class="mini" id="st-play" title="播放/暂停">▶</button><button class="mini" id="st-next" title="下一帧（自动暂停）">›</button> <span class="hint" id="st-anim-info"></span></div>
+            <div class="range-bar">
+              <span class="rb-label">播放范围</span>
+              <input type="number" id="st-range-from" class="tiny-num" min="1" placeholder="1" title="起始帧（留空 = 第1帧）">
+              <span class="rb-sep">~</span>
+              <input type="number" id="st-range-to" class="tiny-num" min="1" placeholder="末帧" title="结束帧（留空 = 最后一帧）">
+              <button class="btn ghost sm" id="st-range-reset" title="恢复为从第 1 帧循环到最后一帧">全程</button>
+              <span class="rb-tip">默认从头播到尾；填 18~24 就只播这段，<b>导出 GIF 也只含这段</b>（PNG 精灵表始终是全部帧）</span>
+            </div>
             <div class="pv-canvas"><canvas id="st-anim" width="10" height="10"></canvas></div>
           </div>
         </div>
@@ -185,6 +193,14 @@
           </div>
           <div class="pv">
             <div class="pv-title">GIF 预览 <button class="mini" id="gif-prev" title="上一帧（自动暂停）">‹</button><button class="mini" id="gif-play" title="播放/暂停">▶</button><button class="mini" id="gif-next" title="下一帧（自动暂停）">›</button> <span class="hint" id="gif-anim-info"></span></div>
+            <div class="range-bar">
+              <span class="rb-label">播放范围</span>
+              <input type="number" id="gif-range-from" class="tiny-num" min="1" placeholder="1" title="起始帧（留空 = 第1帧）">
+              <span class="rb-sep">~</span>
+              <input type="number" id="gif-range-to" class="tiny-num" min="1" placeholder="末帧" title="结束帧（留空 = 最后一帧）">
+              <button class="btn ghost sm" id="gif-range-reset" title="恢复为从第 1 帧循环到最后一帧">全程</button>
+              <span class="rb-tip">默认从头播到尾；填 18~24 就只播这段，<b>导出 GIF 也只含这段</b>（PNG 精灵表始终是全部帧）</span>
+            </div>
             <div class="pv-canvas"><canvas id="gif-anim" width="10" height="10"></canvas></div>
           </div>
         </div>
@@ -234,9 +250,24 @@
 
         <div class="info" id="ac-info">—</div>
 
+        <div class="pv" id="ac-anim-box">
+          <div class="pv-title">动画预览（按上方拆分设置播放）<button class="mini" id="ac-prev" title="上一帧（自动暂停）">‹</button><button class="mini" id="ac-play" title="播放/暂停">▶</button><button class="mini" id="ac-next" title="下一帧（自动暂停）">›</button> <span class="hint" id="ac-anim-info"></span></div>
+          <div class="range-bar">
+            <span class="rb-label">播放范围</span>
+            <input type="number" id="ac-range-from" class="tiny-num" min="1" placeholder="1" title="起始帧（留空 = 第1帧）">
+            <span class="rb-sep">~</span>
+            <input type="number" id="ac-range-to" class="tiny-num" min="1" placeholder="末帧" title="结束帧（留空 = 最后一帧）">
+            <button class="btn ghost sm" id="ac-range-reset" title="恢复为从第 1 帧循环到最后一帧">全程</button>
+            <span class="inline-field rb-delay">帧延时 <input type="number" id="ac-delay" min="0" step="10" value="100"> ms</span>
+            <span class="rb-tip">留空 = 全部帧；填 18~24 则播放与<b>导出 GIF 都只含这段</b>（ZIP 仍是全部帧）</span>
+          </div>
+          <div class="pv-canvas"><canvas id="ac-anim" width="10" height="10"></canvas></div>
+        </div>
+
         <div class="actions">
           <button class="btn ghost" id="ac-refresh">刷新预览</button>
           <button class="btn primary" id="ac-export-zip">导出全部 (ZIP)</button>
+          <button class="btn" id="ac-export-gif">导出 GIF</button>
           <button class="btn ghost" id="ac-clear">清空</button>
         </div>
       </div>

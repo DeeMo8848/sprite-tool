@@ -173,31 +173,83 @@ function moveBefore(arr, fromId, toId) {
   return true;
 }
 
-/* ---- 动画播放器 ---- */
+/* ---- 把区间 [from,to]（0-based，可越界）塞进 n 帧里 ----
+ * 关键：区间要【保住长度】，而不是把两端各自夹到端点。
+ * 两端各自夹紧会让 18~24 遇到只剩 10 帧时塌成单帧（第10帧），也会让 30~40
+ * （25 帧时）塌成 1 帧 —— 用户明明要"一段"，却拿到一张图。
+ *
+ * 规则：
+ *   区间比总帧还长 → 保不住长度，改为锚住起点、截到末尾（20~100 于 25 帧 → 20~25）
+ *   区间比总帧短 → 保住长度，整体平移进合法范围（30~40 于 25 帧 → 15~25）
+ */
+function fitRange(from, to, n) {
+  if (n <= 0) return { from: 0, to: -1 };
+  var len = to - from + 1;
+  if (len < 1) len = 1;
+  if (len >= n) return { from: clamp(from, 0, n - 1), to: n - 1 };
+  var f = clamp(from, 0, n - len);
+  return { from: f, to: f + len - 1 };
+}
+
+/* ---- 动画播放器（支持播放区间，闭区间，0-based；对外暴露 1-based 帧号）---- */
 function createAnim(canvas) {
-  var a = { canvas: canvas, frames: [], durations: [], i: 0, timer: null, playing: false, onFrame: null };
+  var a = { canvas: canvas, frames: [], durations: [], i: 0, from: 0, to: -1, timer: null, playing: false, onFrame: null };
+
+  a.count = function () { return a.frames.length ? (a.to - a.from + 1) : 0; };
+  a.range = function () { return { from: a.from + 1, to: a.to + 1 }; };  // 1-based
+
   a.setFrames = function (frames, durations) {
     a.frames = frames || []; a.durations = durations || [];
-    if (a.i >= a.frames.length) a.i = 0;
+    var n = a.frames.length;
+    if (!n) { a.from = 0; a.to = -1; a.i = 0; }
+    else {
+      // 首次载入 = 全程；之后帧数变化用 fitRange 保住区间长度
+      var r = a.to < 0 ? { from: 0, to: n - 1 } : fitRange(a.from, a.to, n);
+      a.from = r.from; a.to = r.to;
+      if (a.i < a.from || a.i > a.to) a.i = a.from;
+    }
     a.draw();
   };
+
+  // s/e 为 1-based 闭区间；空 / NaN = 到头 / 到尾
+  a.setRange = function (s, e) {
+    var n = a.frames.length;
+    if (!n) { a.from = 0; a.to = -1; a.i = 0; a.draw(); return; }
+    var s1 = (s === '' || s == null || isNaN(s)) ? 1 : s;
+    var e1 = (e === '' || e == null || isNaN(e)) ? n : e;
+    s1 = Math.round(s1); e1 = Math.round(e1);
+    if (e1 < s1) { var t = s1; s1 = e1; e1 = t; }
+    // 越界时保住长度（fitRange 内部处理越界），而不是先夹到端点再算长度
+    var r = fitRange(s1 - 1, e1 - 1, n);
+    a.from = r.from; a.to = r.to;
+    if (a.i < a.from || a.i > a.to) a.i = a.from;
+    a.draw();
+  };
+
   a.draw = function () {
     var c = a.canvas.getContext('2d');
-    if (!a.frames.length) { a.canvas.width = 10; a.canvas.height = 10; c.clearRect(0, 0, 10, 10); return; }
-    var f = a.frames[a.i % a.frames.length];
+    if (!a.frames.length) {
+      a.canvas.width = 10; a.canvas.height = 10; c.clearRect(0, 0, 10, 10);
+      if (a.onFrame) a.onFrame(0, 0, 0, 0);
+      return;
+    }
+    var f = a.frames[a.i];
     a.canvas.width = f.width; a.canvas.height = f.height;
     c = a.canvas.getContext('2d');
     c.imageSmoothingEnabled = false;
     c.clearRect(0, 0, a.canvas.width, a.canvas.height);
     c.drawImage(f, 0, 0);
-    if (a.onFrame) a.onFrame((a.i % a.frames.length) + 1, a.frames.length);
+    // onFrame(区间内第几帧, 区间帧数, 全图第几帧, 全图帧数)
+    if (a.onFrame) a.onFrame(a.i - a.from + 1, a.count(), a.i + 1, a.frames.length);
   };
+
   function tick() {
-    var d = a.durations[a.i % a.frames.length];
+    var d = a.durations[a.i];
     if (d === undefined || d === null) d = 100;
     a.timer = setTimeout(function () {
       if (!a.playing) return;
-      a.i = (a.i + 1) % a.frames.length;
+      var n = a.count();
+      a.i = a.from + ((a.i - a.from + 1) % n);   // 在区间内循环
       a.draw();
       tick();
     }, Math.max(16, d));
@@ -205,8 +257,100 @@ function createAnim(canvas) {
   a.start = function () { if (a.playing || !a.frames.length) return; a.playing = true; tick(); };
   a.stop = function () { a.playing = false; clearTimeout(a.timer); };
   a.toggle = function () { a.playing ? a.stop() : a.start(); return a.playing; };
-  a.step = function (delta) { a.stop(); if (!a.frames.length) return; var n = a.frames.length; a.i = ((a.i + delta) % n + n) % n; a.draw(); };
+  a.step = function (delta) {
+    a.stop();
+    var n = a.count(); if (!n) return;
+    a.i = a.from + (((a.i - a.from + delta) % n + n) % n);
+    a.draw();
+  };
+  a.seek = function (absIdx) {                 // 0-based 全图帧号，自动夹进区间
+    if (!a.count()) return;
+    a.i = clamp(absIdx, a.from, a.to);
+    a.draw();
+  };
+  a.setDuration = function (d) {
+    a.durations = a.frames.map(function () { return d; });
+    if (a.playing) { clearTimeout(a.timer); tick(); }
+  };
   return a;
+}
+
+/* ---- 区间播放输入框：空 = 到头 / 到尾（默认全程循环）---- */
+function bindAnimRange(anim, fromSel, toSel, resetSel) {
+  var fromEl = $(fromSel), toEl = $(toSel), resetEl = resetSel ? $(resetSel) : null;
+  function apply() {
+    var n = anim.frames.length;
+    if (!n) { anim.setRange(fromEl.value, toEl.value); return; }
+    anim.setRange(fromEl.value, toEl.value);
+    // 回填【实际生效】的区间：被夹紧/交换过要让用户看得见，
+    // 否则"我填了18~24 但只播1帧"会让人以为功能坏了。
+    // 留空 = 全程，此时保持留空（不写数字进去），维持"默认全程"的语义。
+    var r = anim.range();
+    var isFull = (r.from === 1 && r.to === n);
+    var typed = fromEl.value !== '' || toEl.value !== '';
+    if (!typed) return;
+    fromEl.value = isFull ? '' : r.from;
+    toEl.value = isFull ? '' : r.to;
+  }
+  function onEdit() { if (this.value !== '') apply(); }   // 编辑途中留空不打断播放
+  [fromEl, toEl].forEach(function (el) {
+    el.addEventListener('input', onEdit);
+    el.addEventListener('change', apply);
+  });
+  if (resetEl) resetEl.addEventListener('click', function () {
+    fromEl.value = ''; toEl.value = '';
+    apply();
+  });
+  // 帧数变化后同步 max，并把越界的输入拉回合法范围
+  apply.syncMax = function () {
+    var n = anim.frames.length;
+    if (!n) return;
+    fromEl.max = n; toEl.max = n;
+    [['from', fromEl], ['to', toEl]].forEach(function (t) {
+      var el = t[1];
+      if (el.value === '') return;
+      var v = parseInt(el.value, 10);
+      if (isNaN(v)) { el.value = ''; return; }
+      if (v > n) el.value = n;
+      else if (v < 1) el.value = 1;
+    });
+    anim.setRange(fromEl.value, toEl.value);
+    var r = anim.range();
+    var isFull = (r.from === 1 && r.to === n);
+    if (fromEl.value !== '' || toEl.value !== '') {
+      fromEl.value = isFull ? '' : r.from;
+      toEl.value = isFull ? '' : r.to;
+    }
+  };
+  return apply;
+}
+
+/* ---- 帧号显示：区间播放时同时标出在全图中的位置 ---- */
+function animInfoText(pos, len, abs, total) {
+  if (!total) return '';
+  var s = pos + '/' + len;
+  if (len !== total) s += '　·　全图第 ' + abs + '/' + total + ' 帧';
+  return s;
+}
+
+/* ---- 按当前播放区间取出帧（全程时返回全部）；导出与预览共用同一份帧 ---- */
+function animSlice(anim) {
+  return animSliceEntries(anim).frames;
+}
+/* 同 animSlice，但连同每帧延时一起返回 —— GIF 页各帧延时可不同，必须成对取 */
+function animSliceEntries(anim) {
+  if (!anim.frames.length) return { frames: [], durations: [] };
+  var all = (anim.from === 0 && anim.to === anim.frames.length - 1);
+  return {
+    frames: all ? anim.frames : anim.frames.slice(anim.from, anim.to + 1),
+    durations: all ? anim.durations.slice() : anim.durations.slice(anim.from, anim.to + 1)
+  };
+}
+/* 区间非全程时的说明文字，全程返回空串 */
+function animRangeLabel(anim) {
+  if (!anim.frames.length) return '';
+  if (anim.from === 0 && anim.to === anim.frames.length - 1) return '';
+  return '第 ' + (anim.from + 1) + '~' + (anim.to + 1) + ' 帧';
 }
 
 /* ================================================================== */
@@ -482,6 +626,7 @@ $('#crop-clear').addEventListener('click', function () {
 /* ================================================================== */
 var st = { items: [], seq: 0, framesTouched: false, gridMode: null, cells: [], cellW: 0, cellH: 0, rows: 1, cols: 1, blockRows: 1, blockCols: 1, mirrorStart: -1, layout: 'compact', sort: 'none' };
 var stAnim = createAnim($('#st-anim'));
+var stRangeApply = bindAnimRange(stAnim, '#st-range-from', '#st-range-to', '#st-range-reset');
 
 function addStFiles(fileList) {
   var files = Array.prototype.slice.call(fileList).filter(function (f) { return /^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name); });
@@ -644,7 +789,8 @@ function renderStitch() {
     return fcv;
   });
   stAnim.setFrames(animFrames, cells.map(function () { return animDelay; }));
-  stAnim.onFrame = function (i, n) { $('#st-anim-info').textContent = i + '/' + n; };
+  stAnim.onFrame = function (pos, len, abs, total) { $('#st-anim-info').textContent = animInfoText(pos, len, abs, total); };
+  if (stRangeApply) stRangeApply.syncMax();
   renderStitchList();
 }
 
@@ -729,17 +875,17 @@ $('#st-export-png').addEventListener('click', function () {
 $('#st-export-gif').addEventListener('click', function () {
   if (!st.cells.length) { toast('请先添加图片', 'err'); return; }
   var delay = parseInt($('#st-delay').value, 10); if (isNaN(delay)) delay = 100;
-  var coff = parseInt($('#st-coff').value, 10) || 0;
-  var frames = st.cells.map(function (cell, i) {
-    var cv = makeCanvas(st.cellW, st.cellH), c = ctx2d(cv);
-    c.imageSmoothingEnabled = false;
-    c.drawImage(cell, stOffX(i, coff), 0);
-    return { data: c.getImageData(0, 0, st.cellW, st.cellH).data, delay: delay };
+  // 与预览共用同一份帧（含居中偏移），保证"预览看到的"="导出的"
+  var picked = animSlice(stAnim);
+  if (!picked.length) { toast('当前播放范围内没有帧', 'err'); return; }
+  var frames = picked.map(function (cv) {
+    return { data: ctx2d(cv).getImageData(0, 0, st.cellW, st.cellH).data, delay: delay };
   });
   try {
     var bytes = GifCodec.encodeGif(frames, st.cellW, st.cellH, { loop: 0 });
     downloadBlob(new Blob([bytes], { type: 'image/gif' }), 'sprite_sheet.gif');
-    toast('已导出 GIF（' + frames.length + ' 帧）', 'ok');
+    var rl = animRangeLabel(stAnim);
+    toast('已导出 GIF（' + frames.length + ' 帧' + (rl ? '，仅' + rl : '') + '）', 'ok');
   } catch (e) { toast('GIF 导出失败：' + e.message, 'err'); }
 });
 
@@ -748,6 +894,7 @@ $('#st-export-gif').addEventListener('click', function () {
 /* ================================================================== */
 var gf = { frames: [], seq: 0, w: 0, h: 0, gridMode: null, sel: null };
 var gfAnim = createAnim($('#gif-anim'));
+var gfRangeApply = bindAnimRange(gfAnim, '#gif-range-from', '#gif-range-to', '#gif-range-reset');
 
 function loadGifFile(file) {
   if (!file) return;
@@ -822,7 +969,7 @@ function renderGif() {
   });
   $('#gif-sheet-dim').textContent = cv.width + '×' + cv.height + '　(' + g.rows + ' 行 × ' + g.cols + ' 列, 共 ' + cells.length + ' 帧)';
 
-  gfAnim.onFrame = function (i, n) { $('#gif-anim-info').textContent = i + '/' + n; };
+  gfAnim.onFrame = function (pos, len, abs, total) { $('#gif-anim-info').textContent = animInfoText(pos, len, abs, total); };
   gfUpdateAnim();
 
   // 总时长提示
@@ -845,6 +992,7 @@ function gfUpdateAnim() {
     durs = durs.concat(durs);
   }
   gfAnim.setFrames(frames, durs);
+  gfRangeApply.syncMax();
 }
 
 function renderGifList() {
@@ -946,26 +1094,18 @@ $('#gif-export-png').addEventListener('click', function () {
 });
 $('#gif-export-gif').addEventListener('click', function () {
   if (!gf.frames.length) { toast('请先载入 GIF', 'err'); return; }
-  var mirror = $('#gif-mirror').checked;
-  var frames = [];
-  gf.frames.forEach(function (f) {
-    var cv = makeCanvas(gf.w, gf.h), c = ctx2d(cv);
-    c.imageSmoothingEnabled = false;
-    c.drawImage(f.canvas, 0, 0);
-    frames.push({ data: c.getImageData(0, 0, gf.w, gf.h).data, delay: f.delay });
+  // 复用预览已切好的帧（含镜像），保证"预览区间 = 导出范围"，且不重复做镜像
+  var picked = animSliceEntries(gfAnim);
+  if (!picked.frames.length) { toast('当前播放范围内没有帧', 'err'); return; }
+  var frames = picked.frames.map(function (cv, i) {
+    var c = ctx2d(cv);
+    return { data: c.getImageData(0, 0, gf.w, gf.h).data, delay: picked.durations[i] };
   });
-  if (mirror) {
-    gf.frames.forEach(function (f) {
-      var cv = makeCanvas(gf.w, gf.h), c = ctx2d(cv);
-      c.imageSmoothingEnabled = false;
-      c.translate(gf.w, 0); c.scale(-1, 1); c.drawImage(f.canvas, 0, 0);
-      frames.push({ data: c.getImageData(0, 0, gf.w, gf.h).data, delay: f.delay });
-    });
-  }
   try {
     var bytes = GifCodec.encodeGif(frames, gf.w, gf.h, { loop: 0 });
     downloadBlob(new Blob([bytes], { type: 'image/gif' }), 'edited.gif');
-    toast('已导出 GIF（' + frames.length + ' 帧）', 'ok');
+    var rl = animRangeLabel(gfAnim);
+    toast('已导出 GIF（' + frames.length + ' 帧' + (rl ? '，仅' + rl : '') + '）', 'ok');
   } catch (e) { toast('GIF 导出失败：' + e.message, 'err'); }
 });
 
@@ -973,6 +1113,9 @@ $('#gif-export-gif').addEventListener('click', function () {
 /*  ③ 自动裁剪（按网格拆分精灵表）                                    */
 /* ================================================================== */
 var ac = { img: null, url: null, name: '', w: 0, h: 0, mode: 'cell', cells: [], cellW: 0, cellH: 0, rows: 1, cols: 1, sel: -1 };
+var acAnim = createAnim($('#ac-anim'));
+var acRangeApply = bindAnimRange(acAnim, '#ac-range-from', '#ac-range-to', '#ac-range-reset');
+acAnim.onFrame = function (pos, len, abs, total) { $('#ac-anim-info').textContent = animInfoText(pos, len, abs, total); };
 
 function acInt(sel) { var v = parseInt($(sel).value, 10); return isNaN(v) ? 0 : v; }
 function acPrefix() { var v = $('#ac-prefix').value.trim(); return v || (ac.name ? baseName(ac.name) : 'slice'); }
@@ -1067,7 +1210,13 @@ function renderAutoCropList() {
     var exp = document.createElement('button'); exp.className = 'mini ac-exp'; exp.textContent = '导出'; exp.title = '导出这一帧 PNG';
     exp.addEventListener('click', function (e) { e.stopPropagation(); acExportOne(cell); });
     el.appendChild(th); el.appendChild(meta); el.appendChild(exp);
-    el.addEventListener('click', function () { ac.sel = cell.idx; renderAutoCropPreview(); renderAutoCropList(); });
+    el.addEventListener('click', function () {
+      ac.sel = cell.idx;
+      renderAutoCropPreview(); renderAutoCropList();
+      // 点列表 = 定位到该帧，方便对着编号找"第 18 帧长什么样"
+      acAnim.stop(); $('#ac-play').textContent = '▶';
+      acAnim.seek(cell.idx);
+    });
     list.appendChild(el);
   });
 }
@@ -1079,7 +1228,26 @@ function acExportOne(cell) {
   canvasToBlob(cv, 'image/png').then(function (b) { downloadBlob(b, acPrefix() + '_' + String(cell.idx + 1).padStart(2, '0') + '.png'); toast('已导出第 ' + (cell.idx + 1) + ' 帧', 'ok'); });
 }
 
-function renderAutoCrop() { renderAutoCropPreview(); renderAutoCropList(); }
+/* 用当前拆分结果（单元格尺寸/行列数/偏移/间距）重建动画帧 */
+var acAnimSig = '';
+function acUpdateAnim() {
+  if (!ac.img || !ac.cells.length) {
+    acAnimSig = '';
+    acAnim.setFrames([]);
+    $('#ac-anim-info').textContent = '';
+    return;
+  }
+  // 几何参数没变就别重切（每敲一个键都重切 25 帧会明显卡）
+  var sig = ac.mode + '|' + ac.cellW + 'x' + ac.cellH + '|' + ac.rows + 'x' + ac.cols + '|' + ac.cells.length + '|' + (ac.img.src || '');
+  if (sig === acAnimSig) return;
+  acAnimSig = sig;
+  var delay = parseInt($('#ac-delay').value, 10);
+  if (isNaN(delay) || delay < 0) delay = 100;
+  acAnim.setFrames(ac.cells.map(acExportCanvas), ac.cells.map(function () { return delay; }));
+  acRangeApply.syncMax();
+}
+
+function renderAutoCrop() { renderAutoCropPreview(); renderAutoCropList(); acUpdateAnim(); }
 
 /* ---- 自动裁剪：事件 ---- */
 function acApplyModeVisibility() {
@@ -1092,11 +1260,22 @@ $('#ac-mode').addEventListener('change', function () { ac.mode = $('#ac-mode').v
 ['#ac-cw', '#ac-ch', '#ac-rows', '#ac-cols', '#ac-offx', '#ac-offy', '#ac-gapx', '#ac-gapy'].forEach(function (sel) {
   $(sel).addEventListener('input', function () { acCompute(); renderAutoCrop(); });
 });
+$('#ac-delay').addEventListener('input', function () {
+  var d = parseInt(this.value, 10); if (isNaN(d) || d < 0) d = 0;
+  acAnim.setDuration(d);
+});
+$('#ac-play').addEventListener('click', function () {
+  if (!ac.cells.length) { toast('请先载入精灵表', 'err'); return; }
+  $('#ac-play').textContent = acAnim.toggle() ? '❚❚' : '▶';
+});
+$('#ac-prev').addEventListener('click', function () { acAnim.step(-1); $('#ac-play').textContent = '▶'; });
+$('#ac-next').addEventListener('click', function () { acAnim.step(+1); $('#ac-play').textContent = '▶'; });
 $('#ac-refresh').addEventListener('click', function () { acCompute(); renderAutoCrop(); toast('已刷新预览'); });
 $('#ac-clear').addEventListener('click', function () {
   if (ac.url) URL.revokeObjectURL(ac.url);
   ac.img = null; ac.url = null; ac.w = 0; ac.h = 0; ac.sel = -1; ac.cells = []; ac.name = '';
   $('#ac-name').textContent = '未选择图片'; $('#ac-badge').textContent = '—';
+  acAnim.stop(); $('#ac-play').textContent = '▶';
   renderAutoCrop();
 });
 $('#ac-export-zip').addEventListener('click', function () {
@@ -1113,6 +1292,26 @@ $('#ac-export-zip').addEventListener('click', function () {
   });
 });
 acApplyModeVisibility();
+
+/* ---- 自动裁剪：导出 GIF（按播放范围取帧）---- */
+$('#ac-export-gif').addEventListener('click', function () {
+  if (!ac.img || !ac.cells.length) { toast('请先载入精灵表', 'err'); return; }
+  if (ac.cellW < 1 || ac.cellH < 1) { toast('单元格尺寸无效，请检查拆分设置', 'err'); return; }
+  var delay = parseInt($('#ac-delay').value, 10);
+  if (isNaN(delay) || delay < 0) delay = 100;
+  // 复用预览已切好的帧：预览区间 = 导出范围，不需要再切一遍
+  var picked = animSlice(acAnim);
+  if (!picked.length) { toast('当前播放范围内没有帧', 'err'); return; }
+  var frames = picked.map(function (cv) {
+    return { data: ctx2d(cv).getImageData(0, 0, ac.cellW, ac.cellH).data, delay: delay };
+  });
+  try {
+    var bytes = GifCodec.encodeGif(frames, ac.cellW, ac.cellH, { loop: 0 });
+    downloadBlob(new Blob([bytes], { type: 'image/gif' }), acPrefix() + '.gif');
+    var rl = animRangeLabel(acAnim);
+    toast('已导出 GIF（' + frames.length + ' 帧' + (rl ? '，仅' + rl : '') + '）', 'ok');
+  } catch (e) { toast('GIF 导出失败：' + e.message, 'err'); }
+});
 
 /* ================================================================== */
 /*  初始状态                                                           */
